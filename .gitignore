@@ -2,17 +2,23 @@
 bin/
 obj/
 *.user
+*.rsuser
 *.suo
 *.cache
 .vs/
 *.dll
 *.exe
 *.pdb
+TestResults/
+*.trx
+coverage/
 
 # Node
 node_modules/
 dist/
 build/
+.vite/
+*.tsbuildinfo
 .env.local
 .env.development.local
 .env.test.local
@@ -34,6 +40,7 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 nul
 
 # Configuración sensible
@@ -41,6 +48,7 @@ appsettings.Development.json
 appsettings.Production.json
 .env
 .env.*
+!.env.example
 *.pfx
 *.key
 *.pem
@@ -75,8 +83,7 @@ Backend/ApiWorker/service/
 
 # appsettings con credenciales reales
 appsettings.json
-!Backend/FichadasAPI/appsettings.json.example
+!appsettings.json.example
 
 # Otros
 clipboard
-

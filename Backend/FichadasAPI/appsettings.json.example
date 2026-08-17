@@ -1,0 +1,23 @@
+{
+  "Urls": "http://127.0.0.1:5210",
+  "ConnectionStrings": {
+    "FichadasDB": "Server=localhost\\SQLEXPRESS;Database=FichadasDB;User Id=sa;Password=CAMBIAR;TrustServerCertificate=True;"
+  },
+  "TangoSettings": {
+    "DatabaseName": "NOMBRE_BASE_TANGO",
+    "Empresa": "Colombraro"
+  },
+  "JwtSettings": {
+    "SecretKey": "CAMBIAR_ESTA_CLAVE_SECRETA_MINIMO_32_CARACTERES",
+    "Issuer": "FichadasAPI",
+    "Audience": "FichadasClient",
+    "ExpirationMinutes": 480
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*"
+}

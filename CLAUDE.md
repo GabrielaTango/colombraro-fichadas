@@ -69,11 +69,55 @@ npm run lint
 Scripts en `Database/`:
 - `CreacionSQLServer.sql`: Script principal de creación de base de datos y tablas
 - `01_CreateDatabase.sql`: Creación de base de datos
-- `CrearTablaConfiguracionCalculo.sql`: Tabla de configuración de cálculo de horas
-- `DatosInicialesConfiguracion.sql`: Datos iniciales de configuración
-- Scripts de migración adicionales disponibles en el directorio
+- `CrearTablaConfiguracionCalculo.sql` / `DatosInicialesConfiguracion.sql`: Configuración de cálculo
+- `CrearTablaNovedades.sql` / `MigrarConceptosANovedades.sql` / `MIGRACION_NOVEDADES.md`: Migración del modelo Conceptos → Novedades (leer el `.md` antes de tocar estas tablas)
+- `CrearTablaConceptos.sql`: Tabla histórica de conceptos (pre-migración)
+- `AgregarCampoActivo.sql`, `AgregarCampoExportada.sql`, `AgregarConceptoAFichadas.sql`, `AgregarNovedadAFichadas.sql`, `AgregarNovedadExtrasPorSector.sql`, `AgregarNovedadTrabajadasPorSector.sql`, `AgregarTurnosRotativos.sql`, `EliminarTablaHorarios.sql`: Migraciones incrementales
+- `VerificarEstadoNovedades.sql`: Script de diagnóstico
 
-Ejecutar scripts en SQL Server Management Studio en el orden indicado por el nombre del archivo.
+Ejecutar scripts en SQL Server Management Studio en el orden indicado por el nombre del archivo. Para desarrollo local con Docker, ver sección Docker más abajo.
+
+### Docker (stack completo)
+
+`docker-compose.yml` levanta SQL Server + Backend + Frontend:
+
+```bash
+# Desde la raíz del repo
+docker-compose up -d --build
+
+# Logs
+docker-compose logs -f backend
+```
+
+Puertos expuestos:
+- SQL Server: `14330` (mapeado a 1433 interno)
+- Backend API: `5210`
+- Frontend (Nginx): `8080` → 5173 interno
+
+Variables de entorno importantes (definir en `.env` o pasar inline):
+- `SA_PASSWORD`: password de `sa` para SQL Server
+- `JWT_SECRET`: clave JWT (mínimo 32 chars)
+
+La imagen del SQL Server (`Database/Dockerfile.sqlserver`) restaura `.bak` desde `Bases/` — ver `Database/docker-init` y `Database/init-db.sh`.
+
+### App de Escritorio (Tauri)
+
+El directorio `Tauri/` empaqueta el frontend React + backend .NET en un instalador Windows único (`.msi`/`.exe`). El backend corre como **sidecar** spawneado por Rust (ver `Tauri/src-tauri/src/lib.rs`) y se conecta al SQL Server remoto definido en `appsettings.json` — **no** hay IPC Tauri, el frontend sigue hablando HTTP a `http://127.0.0.1:5210/api`.
+
+Comandos clave (ver `Tauri/README.md` para detalle completo):
+
+```powershell
+# Dev: tres terminales — backend (dotnet watch), frontend (npm run dev), Tauri (cargo tauri dev)
+# En modo dev, Tauri NO spawnea el sidecar; el backend lo corrés vos a mano.
+
+# Build de producción (instalador):
+powershell -ExecutionPolicy Bypass -File Tauri/scripts/build-prod.ps1
+cd Tauri/src-tauri; cargo tauri build
+```
+
+`build-prod.ps1` hace `npm run build` con `VITE_API_URL=http://localhost:5210/api`, copia `Frontend/dist → Tauri/dist`, y publica el backend self-contained a `Tauri/src-tauri/resources/backend/`. Antes del primer build hay que generar iconos con `cargo tauri icon` (ver README de Tauri).
+
+Prerequisitos: Rust + `cargo install tauri-cli --version "^2.0" --locked`, .NET 8 SDK, Node 20+, MSVC Build Tools, WebView2.
 
 ## Arquitectura del Backend
 
@@ -83,20 +127,26 @@ Ejecutar scripts en SQL Server Management Studio en el orden indicado por el nom
 Backend/FichadasAPI/
 ├── Controllers/                        # Endpoints de la API
 │   ├── AuthController.cs              # Login y cambio de contraseña
+│   ├── UsuariosController.cs          # ABM de usuarios del sistema
 │   ├── SectoresController.cs          # ABM de sectores
 │   ├── EmpleadosController.cs         # ABM de empleados
-│   ├── FichadasController.cs          # ABM y consulta de fichadas
+│   ├── FichadasController.cs          # ABM, importación y exportación de fichadas
+│   ├── ConceptosController.cs         # ABM de conceptos (modelo legacy — migrando a Novedades)
+│   ├── NovedadesController.cs         # ABM de novedades (licencias, ausencias, etc.)
 │   └── ConfiguracionCalculoController.cs  # Config de cálculo de horas
-├── Models/                            # DTOs y entidades
+├── Models/                            # DTOs y entidades (Usuario, Sector, Empleado, Fichada,
+│                                      #   Concepto, Novedad, ConfiguracionCalculo, ExportacionFichada)
 ├── Repositories/                      # Capa de acceso a datos con Dapper
-│   ├── I{Entidad}Repository.cs       # Interfaces
-│   └── {Entidad}Repository.cs        # Implementaciones
+│   ├── I{Entidad}Repository.cs       # Interfaces (Usuario, Sector, Empleado, Fichada,
+│   └── {Entidad}Repository.cs        #   Concepto, Novedad, ConfiguracionCalculo)
 ├── Services/                          # Lógica de negocio
 │   ├── IAuthService.cs / AuthService.cs
 │   ├── IHorasCalculoService.cs / HorasCalculoService.cs
-│   └── IFichadaImportService.cs / FichadaImportService.cs
+│   ├── IFichadaImportService.cs / FichadaImportService.cs
+│   └── IFichadaExportService.cs / FichadaExportService.cs
 ├── Data/                              # Contexto de Dapper
 │   └── DapperContext.cs              # Crea conexiones a FichadasDB y TangoDB
+├── Dockerfile                         # Imagen del backend (usada por docker-compose)
 └── Program.cs                         # Configuración, DI, JWT, CORS, Swagger
 ```
 
@@ -127,26 +177,30 @@ En producción, cambiar a orígenes específicos usando `.WithOrigins()`.
 
 ```
 Frontend/src/
-├── components/          # Componentes reutilizables
-│   ├── Layout.tsx      # Layout con Navbar
-│   └── Navbar.tsx      # Barra de navegación
+├── components/          # Componentes reutilizables (Layout, Navbar)
 ├── pages/              # Páginas de la aplicación
-│   ├── Login.tsx       # Login de usuarios
-│   ├── Home.tsx        # Dashboard principal
-│   ├── Empleados.tsx   # ABM de empleados
-│   ├── Sectores.tsx    # ABM de sectores
-│   ├── Fichadas.tsx    # Consulta de fichadas
-│   ├── ImportarFichadas.tsx  # Importación de Excel
-│   └── Configuraciones.tsx   # Config de cálculo
+│   ├── Login.tsx
+│   ├── CambiarPassword.tsx
+│   ├── Home.tsx                # Dashboard principal
+│   ├── Usuarios.tsx            # ABM de usuarios del sistema
+│   ├── Empleados.tsx           # ABM de empleados
+│   ├── Sectores.tsx            # ABM de sectores
+│   ├── Fichadas.tsx            # Consulta/edición de fichadas
+│   ├── ImportarFichadas.tsx    # Importación desde Excel
+│   ├── Conceptos.tsx           # ABM de conceptos (legacy)
+│   ├── Novedades.tsx           # ABM de novedades (licencias, ausencias, etc.)
+│   └── Configuraciones.tsx     # Config de cálculo de horas
 ├── services/           # Servicios API (axios)
-│   ├── api.ts          # Cliente axios con interceptores
-│   ├── authService.ts  # Login, logout, getCurrentUser
+│   ├── api.ts                  # Cliente axios con interceptores JWT
+│   ├── authService.ts
+│   ├── usuariosService.ts
 │   ├── empleadosService.ts
 │   ├── sectoresService.ts
 │   ├── fichadasService.ts
+│   ├── conceptosService.ts
+│   ├── novedadesService.ts
 │   └── configuracionesService.ts
-├── stores/             # Estado global con Zustand
-│   └── authStore.ts    # Estado de autenticación
+├── stores/             # Zustand (authStore)
 ├── types/              # Tipos TypeScript
 ├── hooks/              # Custom hooks
 ├── utils/              # Utilidades
@@ -166,11 +220,15 @@ El frontend hace fetch de datos con axios + react-query. El token JWT se almacen
 
 - `/login` - Login público
 - `/` - Dashboard (requiere auth)
+- `/usuarios` - ABM Usuarios del sistema (Admin)
 - `/empleados` - ABM Empleados
 - `/sectores` - ABM Sectores
 - `/fichadas` - Consulta de fichadas
 - `/importar-fichadas` - Importación desde Excel
+- `/conceptos` - ABM Conceptos (legacy)
+- `/novedades` - ABM Novedades (licencias, ausencias)
 - `/configuraciones` - Configuración de cálculo de horas
+- `/cambiar-password` - Cambio de contraseña
 
 Todas las rutas (excepto `/login`) requieren autenticación. El Layout wrappea las rutas autenticadas.
 
@@ -183,7 +241,9 @@ Todas las rutas (excepto `/login`) requieren autenticación. El Layout wrappea l
 3. **ba_empleados**: Empleados (vinculados con legajos de Tango)
 4. **ba_configuracion_calculo**: Configuración de reglas de cálculo de horas por sector
 5. **ba_fichadas**: Registros de entrada/salida con horas calculadas
-6. **ba_auditoria**: Registro de acciones (pendiente de implementación completa)
+6. **ba_conceptos**: Conceptos (modelo legacy — ver migración a Novedades)
+7. **ba_novedades**: Novedades que reemplazan a Conceptos (licencias, ausencias, feriados, etc.). Ver `Database/MIGRACION_NOVEDADES.md`
+8. **ba_auditoria**: Registro de acciones (pendiente de implementación completa)
 
 ### Nomenclatura
 
@@ -237,11 +297,13 @@ Configurado por sector en `ba_configuracion_calculo`:
 
 ## Integración con Tango
 
-Los datos de legajos vienen de la base de datos de Tango (externa). La conexión está configurada en `appsettings.json` como `TangoDB`. El sistema lee los empleados de Tango pero mantiene su propia tabla `ba_empleados` para asociar sector y categoría.
+Los datos de legajos vienen de la base de datos de Tango (externa). El sistema lee los empleados de Tango pero mantiene su propia tabla `ba_empleados` para asociar sector y categoría.
 
-El `DapperContext` (Data/DapperContext.cs) provee dos métodos:
-- `CreateConnection()`: Para FichadasDB
-- `CreateTangoConnection()`: Para TangoDB
+**Importante**: el `DapperContext` (Data/DapperContext.cs) usa **una sola** connection string (`ConnectionStrings:FichadasDB`) y consulta Tango con queries cross-database (`USE [...]` o `[DbName].[schema].[tabla]`) usando `TangoSettings:DatabaseName` (en `appsettings.json`) como nombre de la base. Esto implica que **FichadasDB y la base de Tango deben estar en el mismo SQL Server**.
+
+`DapperContext` expone:
+- `CreateConnection()`: conexión a `FichadasDB`
+- `TangoDbName` (propiedad): nombre de la base de Tango para usar en queries cross-DB
 
 ## Importación de Fichadas
 
@@ -305,13 +367,25 @@ Todos los endpoints (excepto `/api/auth/login`) requieren autenticación JWT.
 - `PUT /api/configuracioncalculo/{id}` - Actualizar configuración
 - `DELETE /api/configuracioncalculo/{id}` - Eliminar configuración
 
+### Usuarios (Admin)
+- `GET /api/usuarios`, `GET /api/usuarios/{id}`
+- `POST /api/usuarios`, `PUT /api/usuarios/{id}`, `DELETE /api/usuarios/{id}`
+
+### Conceptos (legacy — preferir Novedades para nuevos desarrollos)
+- `GET /api/conceptos`, `GET /api/conceptos/{id}`
+- `POST /api/conceptos`, `PUT /api/conceptos/{id}`, `DELETE /api/conceptos/{id}`
+
+### Novedades
+- `GET /api/novedades`, `GET /api/novedades/{id}`
+- `POST /api/novedades`, `PUT /api/novedades/{id}`, `DELETE /api/novedades/{id}`
+
 ## Configuración
 
 ### appsettings.json
 
 Configurar antes de ejecutar:
-1. `ConnectionStrings:FichadasDB` - Conexión a SQL Server
-2. `ConnectionStrings:TangoDB` - Conexión a base de datos de Tango
+1. `ConnectionStrings:FichadasDB` - Conexión al SQL Server que aloja **tanto** FichadasDB como la base de Tango (cross-DB queries)
+2. `TangoSettings:DatabaseName` - Nombre de la base de Tango dentro del mismo servidor (ej: `EmpresaEjemplodelta`)
 3. `JwtSettings:SecretKey` - Clave secreta (mínimo 32 caracteres, cambiar en producción)
 
 ### Variables de Entorno (Producción)
@@ -348,9 +422,10 @@ En producción, usar variables de entorno o Azure Key Vault para:
 - **@tanstack/react-query** (5.90.10): Server state management
 - **Zustand** (5.0.8): Client state management
 - **React Hook Form** (7.66.0): Gestión de formularios
+- **React Select** (5.10.2): Selects avanzados
 - **Bootstrap** (5.3.3): UI framework
 - **SweetAlert2** (11.26.3): Modales y alertas
-- **Vite** (7.2.2): Build tool y dev server
+- **Vite** (7.2.2) con **@vitejs/plugin-react-swc**: Build tool y dev server
 
 ## Próximos Pasos / Mejoras Pendientes
 

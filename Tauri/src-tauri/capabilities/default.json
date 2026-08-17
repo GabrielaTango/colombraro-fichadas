@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/windows-schema.json",
+  "identifier": "default",
+  "description": "Permisos por defecto de la aplicación",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
